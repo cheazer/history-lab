@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Git Archaeologist</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      display: flex;
+      justify-content: center;
+      padding: 32px;
+    }
+    .wrap {
+      width: 100%;
+      max-width: 760px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 24px;
+    }
+    h1 { margin-top: 0; }
+    label {
+      display: block;
+      margin: 14px 0 6px;
+      font-size: 14px;
+      color: #c9d1d9;
+    }
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid #30363d;
+      background: #0d1117;
+      color: #e6edf3;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    button {
+      margin-top: 18px;
+      padding: 12px 14px;
+      border: 0;
+      border-radius: 8px;
+      background: #238636;
+      color: white;
+      cursor: pointer;
+      width: 100%;
+      font-size: 15px;
+    }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .msg {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 8px;
+      display: none;
+      white-space: pre-wrap;
+    }
+    .ok { background: #0f2a1a; border: 1px solid #238636; }
+    .err { background: #2a0f0f; border: 1px solid #da3633; }
+    .log {
+      margin-top: 16px;
+      background: #0b0f14;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 12px;
+      max-height: 220px;
+      overflow: auto;
+      font-family: Consolas, monospace;
+      font-size: 13px;
+      display: none;
+    }
+    .log div { margin-bottom: 6px; color: #8b949e; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Git Archaeologist</h1>
+    <p>Generate a backdated Git history from an existing source folder.</p>
+
+    <label>Source Path</label>
+    <input id="sourcePath" placeholder="C:\path\to\source" />
+
+    <label>Target Path</label>
+    <input id="targetPath" placeholder="C:\path\to\target" />
+
+    <div class="row">
+      <div>
+        <label>Start Date</label>
+        <input id="startDate" type="datetime-local" />
+      </div>
+      <div>
+        <label>End Date</label>
+        <input id="endDate" type="datetime-local" />
+      </div>
+    </div>
+
+    <label>Author Name</label>
+    <input id="authorName" placeholder="Your Name" />
+
+    <label>Author Email</label>
+    <input id="authorEmail" placeholder="you@example.com" />
+
+    <button id="runBtn" onclick="runSim()">Run Simulation</button>
+
+    <div id="msg" class="msg"></div>
+    <div id="log" class="log"></div>
+  </div>
+
+  <script>
+    async function runSim() {
+      const btn = document.getElementById("runBtn");
+      const msg = document.getElementById("msg");
+      const log = document.getElementById("log");
+
+      msg.style.display = "none";
+      log.style.display = "none";
+      btn.disabled = true;
+      btn.textContent = "Running...";
+
+      try {
+        const body = {
+          sourcePath: document.getElementById("sourcePath").value.trim(),
+          targetPath: document.getElementById("targetPath").value.trim(),
+          startDate: new Date(document.getElementById("startDate").value).toISOString(),
+          endDate: new Date(document.getElementById("endDate").value).toISOString(),
+          authorName: document.getElementById("authorName").value.trim() || undefined,
+          authorEmail: document.getElementById("authorEmail").value.trim() || undefined
+        };
+
+        const res = await fetch("/api/simulate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          msg.className = "msg err";
+          msg.textContent = data.error || "Request failed";
+          msg.style.display = "block";
+          return;
+        }
+
+        msg.className = "msg ok";
+        msg.textContent = `Success. Commits: ${data.commits}, Chunks: ${data.chunks}`;
+        msg.style.display = "block";
+
+        if (Array.isArray(data.log) && data.log.length) {
+          log.innerHTML = data.log.map(x => `<div>${x}</div>`).join("");
+          log.style.display = "block";
+        }
+      } catch (e) {
+        msg.className = "msg err";
+        msg.textContent = "Could not run simulation.";
+        msg.style.display = "block";
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Run Simulation";
+      }
+    }
+  </script>
+</body>
+</html>
