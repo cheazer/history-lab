@@ -3,6 +3,7 @@ import path from "path";
 import { execSync } from "child_process";
 import { buildChunks } from "./fileWalker";
 
+
 export interface SimulateOptions {
   sourcePath: string;
   targetPath: string;
