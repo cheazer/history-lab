@@ -1,171 +1,340 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Git Archaeologist</title>
   <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1115;
+      --panel: #161a22;
+      --panel-2: #10141b;
+      --border: #2a3240;
+      --text: #e7edf7;
+      --muted: #9aa7b8;
+      --accent: #3aa655;
+      --accent-hover: #2f8f48;
+      --danger: #ef4444;
+    }
+
     * { box-sizing: border-box; }
+
     body {
       margin: 0;
-      font-family: Arial, sans-serif;
-      background: #0d1117;
-      color: #e6edf3;
-      display: flex;
-      justify-content: center;
-      padding: 32px;
-    }
-    .wrap {
-      width: 100%;
-      max-width: 760px;
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 12px;
+      min-height: 100vh;
+      background: linear-gradient(180deg, #0c0f14, #111827);
+      color: var(--text);
+      font-family: Inter, Segoe UI, Arial, sans-serif;
+      display: grid;
+      place-items: center;
       padding: 24px;
     }
-    h1 { margin-top: 0; }
-    label {
-      display: block;
-      margin: 14px 0 6px;
-      font-size: 14px;
-      color: #c9d1d9;
+
+    .card {
+      width: min(760px, 100%);
+      background: rgba(22, 26, 34, 0.96);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
     }
-    input {
-      width: 100%;
-      padding: 10px 12px;
-      border-radius: 8px;
-      border: 1px solid #30363d;
-      background: #0d1117;
-      color: #e6edf3;
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 2rem;
     }
-    .row {
+
+    p {
+      margin: 0 0 20px;
+      color: var(--muted);
+    }
+
+    .grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 12px;
+      gap: 16px;
     }
+
+    .full { grid-column: 1 / -1; }
+
+    label {
+      display: block;
+      margin: 0 0 6px;
+      font-size: 0.92rem;
+      color: #cbd5e1;
+    }
+
+    input, select {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel-2);
+      color: var(--text);
+      outline: none;
+    }
+
+    input::placeholder { color: #6b7280; }
+
+    .checkbox {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #cbd5e1;
+      margin-top: 8px;
+    }
+
+    .checkbox input {
+      width: auto;
+      accent-color: var(--accent);
+    }
+
+    .dropzone {
+      border: 1.5px dashed #3b465a;
+      border-radius: 14px;
+      padding: 18px;
+      text-align: center;
+      color: var(--muted);
+      background: rgba(16, 20, 27, 0.7);
+    }
+
+    .dropzone strong {
+      color: var(--text);
+    }
+
+    .dropzone.dragover {
+      border-color: var(--accent);
+      background: rgba(58, 166, 85, 0.08);
+      color: var(--text);
+    }
+
+    .actions {
+      margin-top: 20px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
     button {
+      border: none;
+      border-radius: 10px;
+      padding: 12px 18px;
+      font-weight: 600;
+      cursor: pointer;
+      color: white;
+      background: var(--accent);
+    }
+
+    button:hover { background: var(--accent-hover); }
+
+    .secondary {
+      background: #273244;
+    }
+
+    .secondary:hover {
+      background: #344155;
+    }
+
+    .message {
       margin-top: 18px;
       padding: 12px 14px;
-      border: 0;
-      border-radius: 8px;
-      background: #238636;
-      color: white;
-      cursor: pointer;
-      width: 100%;
-      font-size: 15px;
-    }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
-    .msg {
-      margin-top: 16px;
-      padding: 12px;
-      border-radius: 8px;
+      border-radius: 10px;
       display: none;
       white-space: pre-wrap;
     }
-    .ok { background: #0f2a1a; border: 1px solid #238636; }
-    .err { background: #2a0f0f; border: 1px solid #da3633; }
-    .log {
-      margin-top: 16px;
-      background: #0b0f14;
-      border: 1px solid #30363d;
-      border-radius: 8px;
-      padding: 12px;
-      max-height: 220px;
-      overflow: auto;
-      font-family: Consolas, monospace;
-      font-size: 13px;
-      display: none;
+
+    .message.error {
+      display: block;
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
     }
-    .log div { margin-bottom: 6px; color: #8b949e; }
+
+    .message.success {
+      display: block;
+      background: rgba(34, 197, 94, 0.12);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      color: #bbf7d0;
+    }
+
+    .hint {
+      margin-top: 8px;
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+
+    .file-name {
+      margin-top: 10px;
+      font-size: 0.92rem;
+      color: #cbd5e1;
+    }
+
+    @media (max-width: 700px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
+  <div class="card">
     <h1>Git Archaeologist</h1>
-    <p>Generate a backdated Git history from an existing source folder.</p>
+    <p>Generate a backdated Git history from a ZIP upload or local folder path.</p>
 
-    <label>Source Path</label>
-    <input id="sourcePath" placeholder="C:\path\to\source" />
+    <form id="form" enctype="multipart/form-data">
+      <div class="grid">
+        <div class="full">
+          <label for="sourceType">Source Type</label>
+          <select id="sourceType" name="sourceType">
+            <option value="zip">ZIP Upload</option>
+            <option value="folder">Local Folder</option>
+          </select>
+        </div>
 
-    <label>Target Path</label>
-    <input id="targetPath" placeholder="C:\path\to\target" />
+        <div class="full" id="zipSection">
+          <label for="archive">ZIP File</label>
+          <input id="archive" name="archive" type="file" accept=".zip" />
+          <div class="hint">Used when Source Type is ZIP Upload.</div>
+        </div>
 
-    <div class="row">
-      <div>
-        <label>Start Date</label>
-        <input id="startDate" type="datetime-local" />
+        <div class="full" id="folderSection" style="display:none;">
+          <label for="sourcePath">Source Path</label>
+          <input id="sourcePath" name="sourcePath" type="text" placeholder="C:\path\to\source" />
+          <div class="hint">Used when Source Type is Local Folder.</div>
+        </div>
+
+        <div class="full">
+          <label for="repoName">GitHub Repo Name</label>
+          <input id="repoName" name="repoName" type="text" placeholder="my-demo-repo" />
+        </div>
+
+        <div class="full">
+          <label for="githubToken">GitHub Token</label>
+          <input id="githubToken" name="githubToken" type="password" placeholder="ghp_..." />
+        </div>
+
+        <div class="full">
+          <label class="checkbox">
+            <input id="repoPrivate" name="repoPrivate" type="checkbox" />
+            Private repository
+          </label>
+        </div>
+
+        <div>
+          <label for="startDate">Start Date</label>
+          <input id="startDate" name="startDate" type="date" />
+        </div>
+
+        <div>
+          <label for="endDate">End Date</label>
+          <input id="endDate" name="endDate" type="date" />
+        </div>
+
+        <div class="full">
+          <label for="authorName">Author Name</label>
+          <input id="authorName" name="authorName" type="text" placeholder="Your Name" />
+        </div>
+
+        <div class="full">
+          <label for="authorEmail">Author Email</label>
+          <input id="authorEmail" name="authorEmail" type="email" placeholder="you@example.com" />
+        </div>
       </div>
-      <div>
-        <label>End Date</label>
-        <input id="endDate" type="datetime-local" />
+
+      <div class="actions">
+        <button type="submit">Run Simulation</button>
+        <button type="button" class="secondary" id="resetBtn">Reset</button>
       </div>
-    </div>
 
-    <label>Author Name</label>
-    <input id="authorName" placeholder="Your Name" />
-
-    <label>Author Email</label>
-    <input id="authorEmail" placeholder="you@example.com" />
-
-    <button id="runBtn" onclick="runSim()">Run Simulation</button>
-
-    <div id="msg" class="msg"></div>
-    <div id="log" class="log"></div>
+      <div id="fileName" class="file-name"></div>
+      <div id="message" class="message"></div>
+    </form>
   </div>
 
   <script>
-    async function runSim() {
-      const btn = document.getElementById("runBtn");
-      const msg = document.getElementById("msg");
-      const log = document.getElementById("log");
+    const form = document.getElementById('form');
+    const sourceType = document.getElementById('sourceType');
+    const zipSection = document.getElementById('zipSection');
+    const folderSection = document.getElementById('folderSection');
+    const archive = document.getElementById('archive');
+    const fileName = document.getElementById('fileName');
+    const message = document.getElementById('message');
+    const resetBtn = document.getElementById('resetBtn');
+    const sourcePath = document.getElementById('sourcePath');
 
-      msg.style.display = "none";
-      log.style.display = "none";
-      btn.disabled = true;
-      btn.textContent = "Running...";
+    function showMessage(text, type) {
+      message.className = 'message ' + type;
+      message.textContent = text;
+      message.style.display = 'block';
+    }
+
+    function clearMessage() {
+      message.className = 'message';
+      message.textContent = '';
+      message.style.display = 'none';
+    }
+
+    function updateSourceUI() {
+      const isZip = sourceType.value === 'zip';
+      zipSection.style.display = isZip ? 'block' : 'none';
+      folderSection.style.display = isZip ? 'none' : 'block';
+      archive.required = isZip;
+      sourcePath.required = !isZip;
+    }
+
+    sourceType.addEventListener('change', updateSourceUI);
+
+    archive.addEventListener('change', () => {
+      fileName.textContent = archive.files && archive.files[0]
+        ? `Selected file: ${archive.files[0].name}`
+        : '';
+    });
+
+    resetBtn.addEventListener('click', () => {
+      form.reset();
+      fileName.textContent = '';
+      clearMessage();
+      updateSourceUI();
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearMessage();
+
+      const fd = new FormData(form);
+
+      if (sourceType.value === 'folder') {
+        fd.delete('archive');
+      } else {
+        fd.delete('sourcePath');
+      }
+
+      if (!fd.get('authorName')) fd.set('authorName', 'Git Archaeologist');
+      if (!fd.get('authorEmail')) fd.set('authorEmail', 'git-archaeologist@example.com');
 
       try {
-        const body = {
-          sourcePath: document.getElementById("sourcePath").value.trim(),
-          targetPath: document.getElementById("targetPath").value.trim(),
-          startDate: new Date(document.getElementById("startDate").value).toISOString(),
-          endDate: new Date(document.getElementById("endDate").value).toISOString(),
-          authorName: document.getElementById("authorName").value.trim() || undefined,
-          authorEmail: document.getElementById("authorEmail").value.trim() || undefined
-        };
-
-        const res = await fetch("/api/simulate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body)
+        const res = await fetch('/api/simulate', {
+          method: 'POST',
+          body: fd
         });
 
         const data = await res.json();
 
         if (!res.ok) {
-          msg.className = "msg err";
-          msg.textContent = data.error || "Request failed";
-          msg.style.display = "block";
-          return;
+          throw new Error(data.error || 'Request failed');
         }
 
-        msg.className = "msg ok";
-        msg.textContent = `Success. Commits: ${data.commits}, Chunks: ${data.chunks}`;
-        msg.style.display = "block";
-
-        if (Array.isArray(data.log) && data.log.length) {
-          log.innerHTML = data.log.map(x => `<div>${x}</div>`).join("");
-          log.style.display = "block";
-        }
-      } catch (e) {
-        msg.className = "msg err";
-        msg.textContent = "Could not run simulation.";
-        msg.style.display = "block";
-      } finally {
-        btn.disabled = false;
-        btn.textContent = "Run Simulation";
+        showMessage(
+          `Success!\nRepo: ${data.repoUrl}\nCommits: ${data.commits.length}\nChunks: ${data.chunks.length}`,
+          'success'
+        );
+      } catch (err) {
+        showMessage(err.message || 'Unknown error', 'error');
       }
-    }
+    });
+
+    updateSourceUI();
   </script>
 </body>
 </html>

@@ -1,159 +1,208 @@
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
-import { buildChunks, FileChunk } from "./fileWalker";
+import os from "os";
+import { spawnSync } from "child_process";
+import { buildChunks } from "./fileWalker";
+import { createGitHubRepo } from "./Github";
 
 export interface SimulateOptions {
-  sourcePath: string;
-  targetPath: string;
+  sourceDir: string;
+  repoName: string;
+  githubToken: string;
+  repoPrivate: boolean;
   startDate: Date;
   endDate: Date;
-  authorName?: string;
-  authorEmail?: string;
+  authorName: string;
+  authorEmail: string;
 }
 
-const IGNORED_DIRS = new Set(["node_modules", ".git", "dist", "uploads", "temp"]);
-const CHUNK_PRIORITY = ["setup", "markup", "styles", "app code", "components", "misc files"];
-
-function interpolateDate(start: Date, end: Date, step: number, total: number): Date {
-  const ratio = total === 1 ? 1 : step / (total - 1);
-  return new Date(start.getTime() + ratio * (end.getTime() - start.getTime()));
+export interface SimulateResult {
+  success: boolean;
+  repoUrl: string;
+  commits: string[];
+  chunks: { label: string; fileCount: number }[];
+  log: string[];
 }
 
-function toGitTimestamp(date: Date): string {
-  return date.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " +0000");
-}
+const MESSAGES: Record<string, string> = {
+  "setup/config": "Initial project setup and configuration",
+  markup: "Add HTML structure and page templates",
+  styles: "Add stylesheets and visual design",
+  "app code": "Implement core application logic",
+  components: "Add reusable UI components",
+  assets: "Add static assets and media files",
+  misc: "Add remaining project files and tidy up",
+};
 
-function copyFile(src: string, srcRoot: string, destRoot: string): void {
-  const relative = path.relative(srcRoot, src);
-  const dest = path.join(destRoot, relative);
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.copyFileSync(src, dest);
-}
-
-function git(cmd: string, cwd: string, env?: NodeJS.ProcessEnv): void {
-  execSync(`git ${cmd}`, {
+function git(args: string[], cwd: string, env?: Record<string, string>): string {
+  const result = spawnSync("git", args, {
     cwd,
     env: { ...process.env, ...env },
-    stdio: "pipe",
+    encoding: "utf-8",
   });
+
+  const stdout = String(result.stdout ?? "").trim();
+  const stderr = String(result.stderr ?? "").trim();
+
+  if (result.status !== 0) {
+    throw new Error(
+      `git ${args.join(" ")} failed (exit ${result.status ?? "?"}): ${stderr || stdout}`
+    );
+  }
+  return stdout;
 }
 
-function hasStagedChanges(cwd: string, env: NodeJS.ProcessEnv): boolean {
+function spaceDates(start: Date, end: Date, count: number): Date[] {
+  if (count <= 0) return [];
+  if (count === 1) return [new Date(start)];
+  const span = end.getTime() - start.getTime();
+  const step = span / (count - 1);
+  return Array.from({ length: count }, (_, i) => new Date(start.getTime() + Math.round(i * step)));
+}
+
+function copyFiles(files: string[], sourceDir: string, destDir: string): void {
+  for (const file of files) {
+    const rel = path.relative(sourceDir, file);
+    const dest = path.join(destDir, rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(file, dest);
+  }
+}
+
+function safeRm(dir: string): void {
   try {
-    const output = execSync("git diff --cached --name-only", {
-      cwd,
-      env: { ...process.env, ...env },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    return output.toString().trim().length > 0;
+    fs.rmSync(dir, { recursive: true, force: true });
   } catch {
-    return false;
   }
 }
 
-function categorizeChunk(label: string): string {
-  if (label.startsWith(".json") || label.startsWith(".yaml") || label.startsWith(".yml") || label.startsWith(".toml")) {
-    return "setup";
-  }
-  if (label.startsWith(".html")) return "markup";
-  if (label.startsWith(".css") || label.startsWith(".scss")) return "styles";
-  if (label.startsWith(".tsx") || label.startsWith(".jsx")) return "components";
-  if (label.startsWith(".ts") || label.startsWith(".js")) return "app code";
-  return "misc files";
-}
-
-function commitMessage(label: string, index: number, total: number): string {
-  if (index === 0) return `chore: initial setup — ${label}`;
-  if (index === total - 1) return `feat: finalize ${label}`;
-
-  switch (label) {
-    case "setup":
-      return "chore: add project setup";
-    case "markup":
-      return "feat: add markup";
-    case "styles":
-      return "feat: add styles";
-    case "components":
-      return "feat: add components";
-    case "app code":
-      return "feat: add app code";
-    default:
-      return `feat: add ${label}`;
-  }
-}
-
-function isIgnored(filePath: string): boolean {
-  return path
-    .normalize(filePath)
-    .split(path.sep)
-    .some((segment) => IGNORED_DIRS.has(segment));
-}
-
-function normalizeChunks(chunks: FileChunk[]): FileChunk[] {
-  return chunks
-    .map((chunk) => ({
-      label: categorizeChunk(chunk.label),
-      files: chunk.files.filter((file) => !isIgnored(file)),
-    }))
-    .filter((chunk) => chunk.files.length > 0)
-    .sort((a, b) => CHUNK_PRIORITY.indexOf(a.label) - CHUNK_PRIORITY.indexOf(b.label));
-}
-
-function ensureGitRepo(targetPath: string, authorName: string, authorEmail: string): void {
-  fs.mkdirSync(targetPath, { recursive: true });
-  if (!fs.existsSync(path.join(targetPath, ".git"))) {
-    git("init", targetPath);
-  }
-  git(`config user.name "${authorName}"`, targetPath);
-  git(`config user.email "${authorEmail}"`, targetPath);
-}
-
-export function simulate(opts: SimulateOptions): { commits: number; chunks: number; log: string[] } {
-  const {
-    sourcePath,
-    targetPath,
-    startDate,
-    endDate,
-    authorName = "Fanuel Gebru",
-    authorEmail = "FischaFanuel@gmail.com",
-  } = opts;
-
-  const chunks = buildChunks(sourcePath);
-  if (chunks.length === 0) throw new Error("No files found in sourcePath.");
-
-  fs.mkdirSync(targetPath, { recursive: true });
-  git("init", targetPath);
-  git(`config user.name "${authorName}"`, targetPath);
-  git(`config user.email "${authorEmail}"`, targetPath);
-
-  let commitCount = 0;
+export async function simulate(opts: SimulateOptions): Promise<SimulateResult> {
   const log: string[] = [];
+  const commits: string[] = [];
+  const chunkSummary: { label: string; fileCount: number }[] = [];
+
+  const push = (msg: string): void => {
+    log.push(msg);
+    process.stdout.write(`[archaeologist] ${msg}\n`);
+  };
+
+  push(`Reconstructing: ${opts.repoName}`);
+  push(`Source: ${opts.sourceDir}`);
+  push(`Date range: ${opts.startDate.toDateString()} → ${opts.endDate.toDateString()}`);
+
+  const chunks = buildChunks(opts.sourceDir);
+  if (chunks.length === 0) {
+    throw new Error("No files found in the source directory.");
+  }
+
+  const totalFiles = chunks.reduce((n, c) => n + c.files.length, 0);
+  push(`Found ${totalFiles} file(s) across ${chunks.length} chunk(s)`);
+  for (const c of chunks) {
+    push(`  [${c.label}] → ${c.files.length} file(s)`);
+  }
+
+  push("Creating GitHub repository…");
+  let repoInfo: Awaited<ReturnType<typeof createGitHubRepo>>;
+  try {
+    repoInfo = await createGitHubRepo({
+      token: opts.githubToken,
+      repoName: opts.repoName,
+      isPrivate: opts.repoPrivate,
+    });
+    push(`✓ Created: ${repoInfo.htmlUrl}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`GitHub repo creation failed: ${msg}`);
+  }
+
+  const workDir = path.join(
+    os.tmpdir(),
+    `git-arch-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
+  fs.mkdirSync(workDir, { recursive: true });
+  push(`Work dir: ${workDir}`);
+
+  git(["init"], workDir);
+  git(["config", "user.name", opts.authorName], workDir);
+  git(["config", "user.email", opts.authorEmail], workDir);
+
+  const authedUrl = repoInfo.cloneUrl.replace("https://", `https://${opts.githubToken}@`);
+  git(["remote", "add", "origin", authedUrl], workDir);
+  push("✓ Local git repository initialised");
+
+  const dates = spaceDates(opts.startDate, opts.endDate, chunks.length);
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
-    if (!chunk) continue;
+    const date = dates[i];
+    if (!chunk || !date) continue;
 
-    const timestamp = toGitTimestamp(interpolateDate(startDate, endDate, i, chunks.length));
-    const dateEnv: NodeJS.ProcessEnv = {
-      GIT_AUTHOR_DATE: timestamp,
-      GIT_COMMITTER_DATE: timestamp,
-    };
+    const message = MESSAGES[chunk.label] ?? "Add project files";
+    push(`Committing [${chunk.label}] (${i + 1}/${chunks.length}): "${message}"`);
 
-    for (const file of chunk.files) {
-      copyFile(file, sourcePath, targetPath);
+    copyFiles(chunk.files, opts.sourceDir, workDir);
+    git(["add", "-A"], workDir);
+
+    const statusResult = spawnSync("git", ["status", "--porcelain"], {
+      cwd: workDir,
+      encoding: "utf-8",
+    });
+    const staged = String(statusResult.stdout ?? "").trim();
+    if (!staged) {
+      push("  (nothing to commit for this chunk — skipping)");
+      continue;
     }
 
-    git("add .", targetPath, dateEnv);
+    const isoDate = date.toISOString();
+    const dateEnv: Record<string, string> = {
+      GIT_AUTHOR_DATE: isoDate,
+      GIT_COMMITTER_DATE: isoDate,
+      GIT_AUTHOR_NAME: opts.authorName,
+      GIT_AUTHOR_EMAIL: opts.authorEmail,
+      GIT_COMMITTER_NAME: opts.authorName,
+      GIT_COMMITTER_EMAIL: opts.authorEmail,
+    };
 
-    if (!hasStagedChanges(targetPath, dateEnv)) continue;
+    git(["commit", "-m", message], workDir, dateEnv);
+    const shortSha = git(["rev-parse", "--short", "HEAD"], workDir);
+    const dateStr = isoDate.slice(0, 10);
 
-    const message = commitMessage(chunk.label, i, chunks.length);
-    git(`commit -m "${message}"`, targetPath, dateEnv);
-
-    log.push(`[${timestamp}] ${message} (${chunk.files.length} files)`);
-    commitCount++;
+    commits.push(`${dateStr} ${shortSha} — ${message}`);
+    chunkSummary.push({ label: chunk.label, fileCount: chunk.files.length });
+    push(`  ✓ ${shortSha} @ ${dateStr}`);
   }
 
-  return { commits: commitCount, chunks: chunks.length, log };
+  if (commits.length === 0) {
+    safeRm(workDir);
+    throw new Error(
+      "No commits were created. The source directory may be empty or contain only ignored files."
+    );
+  }
+
+  push("Pushing to GitHub…");
+  try {
+    git(["push", "-u", "origin", "HEAD:main", "--force"], workDir);
+    push("✓ Pushed → main");
+  } catch {
+    try {
+      git(["push", "-u", "origin", "HEAD:master", "--force"], workDir);
+      push("✓ Pushed → master");
+    } catch (err2: unknown) {
+      const msg = err2 instanceof Error ? err2.message : String(err2);
+      safeRm(workDir);
+      throw new Error(`Push failed: ${msg}`);
+    }
+  }
+
+  safeRm(workDir);
+  push("✓ Cleaned up work directory");
+  push("━━━ Reconstruction complete ━━━");
+
+  return {
+    success: true,
+    repoUrl: repoInfo.htmlUrl,
+    commits,
+    chunks: chunkSummary,
+    log,
+  };
 }

@@ -3,6 +3,7 @@
     // File Layout
     "rootDir": "./src",
     "outDir": "./dist",
+    "types": ["node"],
 
     // Environment Settings
     "module": "commonjs",

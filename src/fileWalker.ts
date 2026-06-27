@@ -6,7 +6,23 @@ export interface FileChunk {
   files: string[];
 }
 
-const IGNORE = new Set(["node_modules", ".git", "dist", "uploads", "temp", ".DS_Store"]);
+const IGNORE = new Set([
+  "node_modules",
+  ".git",
+  "dist",
+  "uploads",
+  "temp",
+  ".DS_Store",
+  "__MACOSX",
+  ".next",
+  ".nuxt",
+  "build",
+  "out",
+  "coverage",
+  ".turbo",
+  ".vercel",
+]);
+
 const BUCKET_ORDER = [
   "setup/config",
   "markup",
@@ -36,97 +52,200 @@ function walk(dir: string, files: string[]): void {
   }
 }
 
-function isIgnoredPath(filePath: string): boolean {
-  return path
-    .normalize(filePath)
-    .split(path.sep)
-    .some((segment) => IGNORE.has(segment));
+const CONFIG_NAMES = new Set([
+  "package.json",
+  "package-lock.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "tsconfig.json",
+  "tsconfig.base.json",
+  "tsconfig.node.json",
+  ".eslintrc",
+  ".eslintrc.js",
+  ".eslintrc.cjs",
+  ".eslintrc.json",
+  ".prettierrc",
+  ".prettierrc.js",
+  ".prettierrc.json",
+  ".babelrc",
+  ".babelrc.js",
+  ".env",
+  ".env.example",
+  ".env.local",
+  ".env.production",
+  ".gitignore",
+  ".gitattributes",
+  ".npmignore",
+  ".nvmrc",
+  ".node-version",
+  "webpack.config.js",
+  "webpack.config.ts",
+  "vite.config.js",
+  "vite.config.ts",
+  "rollup.config.js",
+  "rollup.config.ts",
+  "jest.config.js",
+  "jest.config.ts",
+  "vitest.config.ts",
+  "vitest.config.js",
+  "tailwind.config.js",
+  "tailwind.config.ts",
+  "postcss.config.js",
+  "postcss.config.cjs",
+  "next.config.js",
+  "next.config.ts",
+  "nuxt.config.ts",
+  "svelte.config.js",
+  "astro.config.mjs",
+  "remix.config.js",
+  "readme.md",
+  "readme.txt",
+  "readme.rst",
+  "license",
+  "licence",
+  "makefile",
+  "dockerfile",
+  "docker-compose.yml",
+  "docker-compose.yaml",
+  ".dockerignore",
+  ".editorconfig",
+  ".browserslistrc",
+]);
+
+const ASSET_EXTS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".svg",
+  ".ico",
+  ".webp",
+  ".avif",
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".otf",
+  ".eot",
+  ".mp4",
+  ".mp3",
+  ".wav",
+  ".ogg",
+  ".webm",
+  ".pdf",
+  ".doc",
+  ".docx",
+]);
+
+const CODE_EXTS = new Set([
+  ".ts",
+  ".js",
+  ".mjs",
+  ".cjs",
+  ".mts",
+  ".cts",
+  ".py",
+  ".rb",
+  ".go",
+  ".rs",
+  ".java",
+  ".cs",
+  ".php",
+  ".c",
+  ".cpp",
+  ".h",
+  ".hpp",
+  ".swift",
+  ".kt",
+  ".sh",
+  ".bash",
+  ".zsh",
+  ".ps1",
+  ".sql",
+  ".graphql",
+  ".gql",
+  ".lua",
+  ".r",
+  ".dart",
+  ".ex",
+  ".exs",
+]);
+
+function isInComponentDir(parts: string[]): boolean {
+  return parts.some(
+    (p) => p === "components" || p === "component" || p === "ui" || p === "widgets"
+  );
 }
 
-function bucketForFile(filePath: string): string {
-  const normalized = path.normalize(filePath).toLowerCase();
-  const name = path.basename(normalized);
-  const ext = path.extname(normalized);
-  const parts = normalized.split(path.sep);
+function bucketForFile(relativePath: string): string {
+  const name = path.basename(relativePath).toLowerCase();
+  const ext = path.extname(relativePath).toLowerCase();
+  // Split on both sep and forward slash (from ZIPs on Windows)
+  const parts = relativePath
+    .toLowerCase()
+    .replace(/\\/g, "/")
+    .split("/");
 
-  const configFiles = new Set([
-    "package.json",
-    "package-lock.json",
-    "yarn.lock",
-    "pnpm-lock.yaml",
-    "tsconfig.json",
-    "jsconfig.json",
-    ".eslintrc",
-    ".eslintrc.json",
-    ".prettierrc",
-    ".prettierrc.json",
-    ".gitignore",
-    "readme.md",
-    "readme.mdx",
-    "license",
-  ]);
-
-  if (configFiles.has(name) || [".json", ".yaml", ".yml", ".toml"].includes(ext)) {
+  // ── Config / setup ────────────────────────────────────────────────────────
+  if (CONFIG_NAMES.has(name)) return "setup/config";
+  if (
+    name.startsWith(".eslintrc") ||
+    name.startsWith(".prettierrc") ||
+    name.startsWith(".babelrc")
+  )
     return "setup/config";
+
+  // ── Markup / templates ────────────────────────────────────────────────────
+  if ([".html", ".htm", ".ejs", ".hbs", ".mustache", ".pug", ".njk"].includes(ext)) {
+    return isInComponentDir(parts) ? "components" : "markup";
+  }
+  if ([".jsx", ".tsx"].includes(ext)) {
+    return isInComponentDir(parts) ? "components" : "markup";
+  }
+  if ([".vue", ".svelte"].includes(ext)) {
+    return isInComponentDir(parts) ? "components" : "markup";
   }
 
-  if ([".html", ".htm", ".svelte", ".vue", ".njk", ".ejs", ".twig"].includes(ext)) {
-    return "markup";
-  }
-
-  if ([".css", ".scss", ".sass", ".less", ".styl"].includes(ext)) {
+  // ── Styles ────────────────────────────────────────────────────────────────
+  if ([".css", ".scss", ".sass", ".less", ".styl", ".pcss"].includes(ext)) {
     return "styles";
   }
 
-  const assetExts = [
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".webp",
-    ".svg",
-    ".mp4",
-    ".mp3",
-    ".ico",
-    ".woff",
-    ".woff2",
-    ".ttf",
-    ".otf",
-  ];
+  // ── Assets ────────────────────────────────────────────────────────────────
+  if (ASSET_EXTS.has(ext)) return "assets";
 
-  if (assetExts.includes(ext) || parts.includes("assets") || parts.includes("static") || parts.includes("public")) {
-    return "assets";
-  }
+  // ── Components (by directory, any code) ───────────────────────────────────
+  if (isInComponentDir(parts)) return "components";
 
-  const isComponentFolder = parts.includes("components") || parts.includes("component");
-  const isPageFolder = parts.includes("pages") || parts.includes("page") || parts.includes("layouts") || parts.includes("layout");
+  // ── App code ──────────────────────────────────────────────────────────────
+  if (CODE_EXTS.has(ext)) return "app code";
 
-  if (ext === ".tsx" || ext === ".jsx") {
-    return isComponentFolder ? "components" : "app code";
-  }
-
-  if (ext === ".ts" || ext === ".js") {
-    if (isComponentFolder) return "components";
-    return "app code";
-  }
-
-  if (isComponentFolder) return "components";
-  if (isPageFolder) return "app code";
-
+  // ── Misc ─────────────────────────────────────────────────────────────────
   return "misc";
 }
 
-export function buildChunks(sourcePath: string): FileChunk[] {
-  const filePaths: string[] = [];
-  walk(sourcePath, filePaths);
+export function buildChunks(sourceDir: string): FileChunk[] {
+  const allFiles: string[] = [];
+  walk(sourceDir, allFiles);
 
-  const buckets = new Map<string, string[]>(BUCKET_ORDER.map((label) => [label, []]));
+  // Initialise every bucket so insertion order matches BUCKET_ORDER
+  const buckets = new Map<string, string[]>(
+    BUCKET_ORDER.map((label) => [label, []] as [string, string[]])
+  );
 
-  for (const filePath of filePaths) {
-    if (isIgnoredPath(filePath)) continue;
-    const label = bucketForFile(filePath);
-    buckets.get(label)!.push(filePath);
+  for (const file of allFiles) {
+    const relative = path.relative(sourceDir, file);
+    const bucket = bucketForFile(relative);
+    const dest = buckets.has(bucket) ? bucket : "misc";
+    buckets.get(dest)!.push(file);
   }
 
-  return BUCKET_ORDER.map((label) => ({ label, files: buckets.get(label)! })).filter((chunk) => chunk.files.length > 0);
+  const chunks: FileChunk[] = [];
+  for (const label of BUCKET_ORDER) {
+    const files = buckets.get(label)!;
+    if (files.length > 0) {
+      chunks.push({ label, files });
+    }
+  }
+
+  return chunks;
 }
