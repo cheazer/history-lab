@@ -1,8 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
-import { buildChunks } from "./fileWalker";
-
+import { buildChunks, FileChunk } from "./fileWalker";
 
 export interface SimulateOptions {
   sourcePath: string;
@@ -12,6 +11,9 @@ export interface SimulateOptions {
   authorName?: string;
   authorEmail?: string;
 }
+
+const IGNORED_DIRS = new Set(["node_modules", ".git", "dist", "uploads", "temp"]);
+const CHUNK_PRIORITY = ["setup", "markup", "styles", "app code", "components", "misc files"];
 
 function interpolateDate(start: Date, end: Date, step: number, total: number): Date {
   const ratio = total === 1 ? 1 : step / (total - 1);
@@ -50,10 +52,61 @@ function hasStagedChanges(cwd: string, env: NodeJS.ProcessEnv): boolean {
   }
 }
 
+function categorizeChunk(label: string): string {
+  if (label.startsWith(".json") || label.startsWith(".yaml") || label.startsWith(".yml") || label.startsWith(".toml")) {
+    return "setup";
+  }
+  if (label.startsWith(".html")) return "markup";
+  if (label.startsWith(".css") || label.startsWith(".scss")) return "styles";
+  if (label.startsWith(".tsx") || label.startsWith(".jsx")) return "components";
+  if (label.startsWith(".ts") || label.startsWith(".js")) return "app code";
+  return "misc files";
+}
+
 function commitMessage(label: string, index: number, total: number): string {
   if (index === 0) return `chore: initial setup — ${label}`;
   if (index === total - 1) return `feat: finalize ${label}`;
-  return `feat: add ${label}`;
+
+  switch (label) {
+    case "setup":
+      return "chore: add project setup";
+    case "markup":
+      return "feat: add markup";
+    case "styles":
+      return "feat: add styles";
+    case "components":
+      return "feat: add components";
+    case "app code":
+      return "feat: add app code";
+    default:
+      return `feat: add ${label}`;
+  }
+}
+
+function isIgnored(filePath: string): boolean {
+  return path
+    .normalize(filePath)
+    .split(path.sep)
+    .some((segment) => IGNORED_DIRS.has(segment));
+}
+
+function normalizeChunks(chunks: FileChunk[]): FileChunk[] {
+  return chunks
+    .map((chunk) => ({
+      label: categorizeChunk(chunk.label),
+      files: chunk.files.filter((file) => !isIgnored(file)),
+    }))
+    .filter((chunk) => chunk.files.length > 0)
+    .sort((a, b) => CHUNK_PRIORITY.indexOf(a.label) - CHUNK_PRIORITY.indexOf(b.label));
+}
+
+function ensureGitRepo(targetPath: string, authorName: string, authorEmail: string): void {
+  fs.mkdirSync(targetPath, { recursive: true });
+  if (!fs.existsSync(path.join(targetPath, ".git"))) {
+    git("init", targetPath);
+  }
+  git(`config user.name "${authorName}"`, targetPath);
+  git(`config user.email "${authorEmail}"`, targetPath);
 }
 
 export function simulate(opts: SimulateOptions): { commits: number; chunks: number; log: string[] } {

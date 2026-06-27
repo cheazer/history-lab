@@ -20,12 +20,18 @@ fs.mkdirSync(tempDir, { recursive: true });
 
 const upload = multer({ dest: uploadDir });
 
+const parseBoolean = (value: string | undefined): boolean =>
+  ["true", "1", "yes", "on"].includes(String(value ?? "").trim().toLowerCase());
+
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === "string" && value.trim().length > 0;
+
 interface StartBody {
   sourceType: "folder" | "zip";
   sourcePath?: string;
   repoName: string;
   githubToken: string;
-  repoPrivate: boolean;
+  repoPrivate: string;
   startDate: string;
   endDate: string;
   authorName?: string;
@@ -34,34 +40,67 @@ interface StartBody {
 
 app.post("/api/simulate", upload.single("archive"), async (req, res) => {
   try {
-    const {
-      sourceType,
-      sourcePath,
-      repoName,
-      githubToken,
-      repoPrivate,
-      startDate,
-      endDate,
-      authorName,
-      authorEmail,
-    } = req.body as StartBody;
+    const sourceType = isNonEmptyString(req.body.sourceType)
+      ? req.body.sourceType.trim()
+      : "";
+    const sourcePath = isNonEmptyString(req.body.sourcePath)
+      ? req.body.sourcePath.trim()
+      : "";
+    const repoName = isNonEmptyString(req.body.repoName)
+      ? req.body.repoName.trim()
+      : "";
+    const githubToken = isNonEmptyString(req.body.githubToken)
+      ? req.body.githubToken.trim()
+      : "";
+    const repoPrivate = isNonEmptyString(req.body.repoPrivate)
+      ? req.body.repoPrivate.trim()
+      : "false";
+    const startDate = isNonEmptyString(req.body.startDate)
+      ? req.body.startDate.trim()
+      : "";
+    const endDate = isNonEmptyString(req.body.endDate)
+      ? req.body.endDate.trim()
+      : "";
+    const authorName = isNonEmptyString(req.body.authorName)
+      ? req.body.authorName.trim()
+      : undefined;
+    const authorEmail = isNonEmptyString(req.body.authorEmail)
+      ? req.body.authorEmail.trim()
+      : undefined;
 
-    const isPrivate = repoPrivate === "true";
-
-    if (!repoName || !githubToken || !startDate || !endDate) {
-      res.status(400).json({ error: "repoName, githubToken, startDate, and endDate are required." });
+    if (!["folder", "zip"].includes(sourceType)) {
+      res.status(400).json({ error: "sourceType must be either 'folder' or 'zip'." });
       return;
     }
 
-    let actualSourcePath = sourcePath;
+    if (!repoName) {
+      res.status(400).json({ error: "repoName is required." });
+      return;
+    }
 
+    if (!githubToken) {
+      res.status(400).json({ error: "githubToken is required." });
+      return;
+    }
+
+    if (!startDate || !endDate) {
+      res.status(400).json({ error: "startDate and endDate are required." });
+      return;
+    }
+
+    const isPrivate = parseBoolean(repoPrivate);
+
+    let actualSourcePath = sourcePath;
     if (sourceType === "zip") {
-      if (!req.file) {
-        res.status(400).json({ error: "ZIP upload required." });
+      if (!req.file || !req.file.path) {
+        res.status(400).json({ error: "ZIP archive file is required for sourceType 'zip'." });
         return;
       }
 
-      const extractPath = path.join(tempDir, `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      const extractPath = path.join(
+        tempDir,
+        `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      );
       fs.mkdirSync(extractPath, { recursive: true });
 
       const zip = new AdmZip(req.file.path);
@@ -69,39 +108,41 @@ app.post("/api/simulate", upload.single("archive"), async (req, res) => {
       actualSourcePath = extractPath;
     }
 
-    if (!actualSourcePath) {
-      res.status(400).json({ error: "sourcePath is required for folder mode." });
+    if (sourceType === "folder" && !actualSourcePath) {
+      res.status(400).json({ error: "sourcePath is required for sourceType 'folder'." });
       return;
     }
 
     const start = new Date(startDate);
     const end = new Date(endDate);
-
-    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) {
-      res.status(400).json({ error: "Invalid startDate or endDate." });
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start >= end) {
+      res.status(400).json({ error: "startDate and endDate must be valid dates with startDate before endDate." });
       return;
     }
 
     const { cloneUrl } = await createGitHubRepo({
       token: githubToken,
       name: repoName,
-      private: isPrivate
+      private: isPrivate,
     });
 
     const workDir = path.join(tempDir, `${repoName}-${Date.now()}`);
     fs.mkdirSync(workDir, { recursive: true });
 
-    const result = simulate({
-  sourcePath: actualSourcePath,
-  targetPath: workDir,
-  startDate: start,
-  endDate: end,
-  ...(authorName !== undefined ? { authorName } : {}),
-  ...(authorEmail !== undefined ? { authorEmail } : {}),
-});
+    const simulateOptions: Parameters<typeof simulate>[0] = {
+      sourcePath: actualSourcePath,
+      targetPath: workDir,
+      startDate: start,
+      endDate: end,
+    };
+
+    if (authorName) simulateOptions.authorName = authorName;
+    if (authorEmail) simulateOptions.authorEmail = authorEmail;
+
+    const result = simulate(simulateOptions);
 
     execSync(`git remote add origin ${cloneUrl}`, { cwd: workDir, stdio: "pipe" });
-    execSync(`git push -u origin main`, {
+    execSync("git push -u origin main", {
       cwd: workDir,
       stdio: "pipe",
       env: {
